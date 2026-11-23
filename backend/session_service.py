@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -27,3 +28,25 @@ def create_session(db: Session, user_id: UUID) -> str:
         raise
 
     return token
+
+def find_session_by_token(db: Session, token: str) -> AuthSession | None:
+    token_hash = hash_session_token(token)
+    statement = select(AuthSession).where(
+        AuthSession.session_token_hash == token_hash
+    )
+    return db.scalar(statement)
+
+def is_session_valid(session: AuthSession, now: datetime) -> bool:
+    idle_expires_at = session.last_seen_at + timedelta(
+        seconds=settings.SESSION_IDLE_TIMEOUT_SECONDS
+    )
+
+    return (
+        session.revoked_at is None
+        and session.expires_at > now
+        and idle_expires_at > now
+    )
+
+def update_session_activity(db: Session, session: AuthSession, now: datetime) -> None:
+    session.last_seen_at = now
+    db.commit()

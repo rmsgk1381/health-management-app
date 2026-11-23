@@ -1,8 +1,13 @@
+from datetime import datetime, timezone, timedelta
+
 from fastapi.testclient import TestClient
+import pytest
+
 from main import app
 from database import get_db
 from settings import settings
 from user_service import register_user
+from session_service import create_session
 
 from sqlalchemy import select
 from models import LoginFailure, Session as AuthSession
@@ -229,3 +234,86 @@ def test_login_limits_normalized_email_for_unknown_user(postgres_db, monkeypatch
     )
     assert saved_failure is not None
     assert saved_failure.failure_count == 2
+
+# 유효한 세션 쿠키로 내 정보 경로에서 인증된 사용자 정보를 반환하는지 확인한다.
+def test_get_me_returns_authenticated_user(postgres_db, monkeypatch):
+    monkeypatch.setitem(app.dependency_overrides, get_db, lambda: postgres_db)
+    user = register_user(
+        postgres_db, "step20.me@example.com", "testpassword"
+    )
+    token = create_session(postgres_db, user.id)
+
+    session = postgres_db.scalar(
+        select(AuthSession).where(
+            AuthSession.session_token_hash == hash_session_token(token)
+        )
+    )
+    assert session is not None
+
+    last_seen_before = datetime.now(timezone.utc) - timedelta(days=1)
+    session.last_seen_at = last_seen_before
+    postgres_db.commit()
+
+    with TestClient(app) as test_client:
+        test_client.cookies.set(settings.SESSION_COOKIE_NAME, token)
+        response = test_client.get("/api/v1/users/me")
+
+    assert response.status_code == 200
+    assert response.json() == {"id": str(user.id), "email": user.email}
+
+    postgres_db.refresh(session)
+    assert session.last_seen_at > last_seen_before
+
+@pytest.mark.parametrize("token", [None, "unknown-dummy-session-token"])
+# 쿠키가 없거나 DB에 없는 세션 토큰이면 내 정보 요청을 공통 401로 거부한다.
+def test_get_me_rejects_missing_or_unknown_session_token(
+    token, postgres_db, monkeypatch
+):
+    monkeypatch.setitem(app.dependency_overrides, get_db, lambda: postgres_db)
+
+    with TestClient(app) as test_client:
+        if token is not None:
+            test_client.cookies.set(settings.SESSION_COOKIE_NAME, token)
+        response = test_client.get("/api/v1/users/me")
+
+    assert response.status_code == 401
+    assert response.json() == {
+        "error": {
+            "code": "INVALID_SESSION",
+            "message": "인증이 필요합니다.",
+            "details": [],
+        }
+    }
+
+# 절대·유휴 만료 또는 폐기된 세션은 내 정보 요청에서 공통 401로 거부한다.
+@pytest.mark.parametrize("expired_state", ["absolute", "idle", "revoked"])
+def test_get_me_rejects_expired_or_revoked_session(
+    expired_state, postgres_db, monkeypatch
+):
+    monkeypatch.setitem(app.dependency_overrides, get_db, lambda: postgres_db)
+    user = register_user(
+        postgres_db, f"step20.{expired_state}@example.com", "testpassword"
+    )
+    token = create_session(postgres_db, user.id)
+    session = postgres_db.scalar(
+        select(AuthSession).where(
+            AuthSession.session_token_hash == hash_session_token(token)
+        )
+    )
+    assert session is not None
+
+    now = datetime.now(timezone.utc)
+    if expired_state == "absolute":
+        session.expires_at = now - timedelta(minutes=1)
+    elif expired_state == "idle":
+        session.last_seen_at = now - timedelta(days=8)
+    else:
+        session.revoked_at = now - timedelta(minutes=1)
+    postgres_db.commit()
+
+    with TestClient(app) as test_client:
+        test_client.cookies.set(settings.SESSION_COOKIE_NAME, token)
+        response = test_client.get("/api/v1/users/me")
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "INVALID_SESSION"

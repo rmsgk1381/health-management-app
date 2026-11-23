@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import Depends, FastAPI, Request, Response
@@ -14,8 +15,13 @@ from user_service import (
     DuplicateEmailError,
     InvalidCredentialsError,
 )
-from session_service import create_session
-
+from session_service import (
+    AuthSession,
+    create_session,
+    find_session_by_token,
+    is_session_valid,
+    update_session_activity,
+)
 
 class HealthResponse(BaseModel):
     status: str
@@ -37,6 +43,13 @@ class LoginResponse(BaseModel):
     id: UUID
     email: str
 
+class InvalidSessionError(Exception):
+    pass
+
+class MeResponse(BaseModel):
+    id: UUID
+    email: str
+
 app = FastAPI(title=settings.APP_NAME)
 
 
@@ -52,6 +65,34 @@ async def handle_validation_error(request: Request, exc: RequestValidationError)
             }
         },
     )
+
+@app.exception_handler(InvalidSessionError)
+async def handle_invalid_session(request: Request, exc: InvalidSessionError):
+    return JSONResponse(
+        status_code=401,
+        content={
+            "error": {
+                "code": "INVALID_SESSION",
+                "message": "인증이 필요합니다.",
+                "details": [],
+            }
+        },
+    )
+
+
+def require_authenticated_session(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> AuthSession:
+    token = request.cookies.get(settings.SESSION_COOKIE_NAME)
+    session = find_session_by_token(db, token) if token else None
+    now = datetime.now(timezone.utc)
+
+    if session is None or not is_session_valid(session, now):
+        raise InvalidSessionError()
+
+    update_session_activity(db, session, now)
+    return session
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -126,3 +167,9 @@ def login(payload: LoginRequest, response: Response, db: Session = Depends(get_d
     )
 
     return LoginResponse(id=user.id, email=user.email)
+
+@app.get("/api/v1/users/me", response_model=MeResponse)
+def get_me(
+    session: AuthSession = Depends(require_authenticated_session),
+) -> MeResponse:
+    return MeResponse(id=session.user.id, email=session.user.email)

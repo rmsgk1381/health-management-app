@@ -28,4 +28,6 @@ class Settings(BaseSettings):
     LOGIN_FAILURE_LIMIT: PositiveInt = 5
     LOGIN_BLOCK_SECONDS: PositiveInt = 60
 
+    SESSION_IDLE_TIMEOUT_SECONDS: PositiveInt = 7 * 24 * 60 * 60
+
 settings = Settings()  # pyright: ignore[reportCallIssue]
