@@ -1,7 +1,59 @@
 **/.venv/
+**/.venv-verify*/
 **/node_modules/
 **/dist/
 **/.env
 **/.env.*
 !**/.env.example
 **/__pycache__/
+
+# Python caches and test reports
+*.py[cod]
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+.coverage
+.coverage.*
+**/htmlcov/
+**/coverage/
+coverage.xml
+
+# Other generated output
+**/dist-ssr/
+*.tsbuildinfo
+logs/
+*.log
+*.tmp
+*.bak
+*.swp
+*.swo
+*~
+
+# Local database files, exports and private keys
+backups/
+dumps/
+*.dump
+*.sql.gz
+*.db
+*.sqlite
+*.sqlite3
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Local editor and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Local AI agent files and Git automation helpers
+/AGENTS.md
+/.agents/
+/.codex/
+/scripts/README.md
+/scripts/step-git.json
+/scripts/step_git.py
+/scripts/tests/test_step_git.py
