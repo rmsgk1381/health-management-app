@@ -50,3 +50,11 @@ def is_session_valid(session: AuthSession, now: datetime) -> bool:
 def update_session_activity(db: Session, session: AuthSession, now: datetime) -> None:
     session.last_seen_at = now
     db.commit()
+
+def revoke_session(
+    db: Session,
+    session: AuthSession,
+    now: datetime,
+) -> None:
+    session.revoked_at = now
+    db.commit()

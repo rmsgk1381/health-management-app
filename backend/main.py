@@ -21,6 +21,7 @@ from session_service import (
     find_session_by_token,
     is_session_valid,
     update_session_activity,
+    revoke_session
 )
 
 class HealthResponse(BaseModel):
@@ -173,3 +174,25 @@ def get_me(
     session: AuthSession = Depends(require_authenticated_session),
 ) -> MeResponse:
     return MeResponse(id=session.user.id, email=session.user.email)
+
+@app.post("/api/v1/auth/logout", status_code=204)
+def logout(
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+) -> Response:
+    token = request.cookies.get(settings.SESSION_COOKIE_NAME)
+    session = find_session_by_token(db, token) if token else None
+    now = datetime.now(timezone.utc)
+
+    if session is not None and is_session_valid(session, now):
+        revoke_session(db, session, now)
+    response.delete_cookie(
+        key=settings.SESSION_COOKIE_NAME,
+        path="/",
+        secure=settings.SESSION_COOKIE_SECURE,
+        httponly=True,
+        samesite="lax",
+    )
+    response.status_code = 204
+    return response

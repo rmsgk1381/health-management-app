@@ -317,3 +317,70 @@ def test_get_me_rejects_expired_or_revoked_session(
 
     assert response.status_code == 401
     assert response.json()["error"]["code"] == "INVALID_SESSION"
+
+@pytest.mark.parametrize("session_state", ["active", "missing", "unknown", "expired"])
+# 로그아웃이 세션 상태와 무관하게 쿠키를 지우고 반복 요청을 안전하게 처리하는지 확인한다.
+def test_logout_is_idempotent_and_clears_cookie(
+    session_state, postgres_db, monkeypatch
+):
+    monkeypatch.setitem(app.dependency_overrides, get_db, lambda: postgres_db)
+    token = None
+    session = None
+
+    if session_state in {"active", "expired"}:
+        user = register_user(
+            postgres_db, f"step21.{session_state}@example.com", "testpassword"
+        )
+        token = create_session(postgres_db, user.id)
+        session = postgres_db.scalar(
+            select(AuthSession).where(
+                AuthSession.session_token_hash == hash_session_token(token)
+            )
+        )
+        assert session is not None
+
+        if session_state == "expired":
+            session.expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+            postgres_db.commit()
+    elif session_state == "unknown":
+        token = "unknown-dummy-session-token"
+
+    with TestClient(app) as test_client:
+        if token is not None:
+            test_client.cookies.set(
+                settings.SESSION_COOKIE_NAME,
+                token,
+                domain="testserver.local",
+                path="/",
+            )
+
+        response = test_client.post("/api/v1/auth/logout")
+        cookie = SimpleCookie()
+        cookie.load(response.headers["set-cookie"])
+
+        assert response.status_code == 204
+        assert cookie[settings.SESSION_COOKIE_NAME].value == ""
+        assert cookie[settings.SESSION_COOKIE_NAME]["max-age"] == "0"
+        assert cookie[settings.SESSION_COOKIE_NAME]["expires"]
+        assert cookie[settings.SESSION_COOKIE_NAME]["path"] == "/"
+        assert test_client.cookies.get(settings.SESSION_COOKIE_NAME) is None
+
+        if session is not None:
+            postgres_db.refresh(session)
+            if session_state == "active":
+                assert session.revoked_at is not None
+            else:
+                assert session.revoked_at is None
+
+        repeated_response = test_client.post("/api/v1/auth/logout")
+        if session_state == "active" and token is not None:
+            test_client.cookies.set(
+                settings.SESSION_COOKIE_NAME,
+                token,
+                domain="testserver.local",
+                path="/",
+            )
+            protected_response = test_client.get("/api/v1/users/me")
+            assert protected_response.status_code == 401
+
+    assert repeated_response.status_code == 204
