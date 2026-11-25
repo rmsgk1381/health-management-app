@@ -12,6 +12,7 @@ from session_service import (
     find_session_by_token,
     is_session_valid,
     update_session_activity,
+    delete_invalid_sessions,
 )
 from settings import settings
 from user_service import register_user
@@ -113,3 +114,34 @@ def test_find_session_by_token_returns_matching_session(postgres_db):
 
     assert found_session is not None
     assert found_session.user_id == user.id
+
+# 사용자의 폐기·절대 만료·유휴 만료 세션만 삭제하고 유효 세션은 보존하는지 확인한다.
+def test_delete_invalid_sessions_preserves_active_session(postgres_db):
+    now = datetime.now(timezone.utc)
+    user = register_user(
+        postgres_db, "step21.cleanup@example.com", "testpassword"
+    )
+
+    tokens = [create_session(postgres_db, user.id) for _ in range(4)]
+    sessions = [find_session_by_token(postgres_db, token) for token in tokens]
+    active, revoked, absolute_expired, idle_expired = sessions
+
+    assert active is not None
+    assert revoked is not None
+    assert absolute_expired is not None
+    assert idle_expired is not None
+
+    revoked.revoked_at = now - timedelta(minutes=1)
+    absolute_expired.expires_at = now - timedelta(minutes=1)
+    idle_expired.last_seen_at = now - timedelta(
+        seconds=settings.SESSION_IDLE_TIMEOUT_SECONDS + 1
+    )
+    postgres_db.commit()
+
+    delete_invalid_sessions(postgres_db, user.id, now)
+    remaining = postgres_db.scalars(
+        select(AuthSession).where(AuthSession.user_id == user.id)
+    ).all()
+
+    assert len(remaining) == 1
+    assert remaining[0].id == active.id

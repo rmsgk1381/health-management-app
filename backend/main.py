@@ -8,7 +8,11 @@ from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session
 
 from database import get_db
-from login_service import authenticate_user_with_rate_limit, LoginRateLimitError
+from login_service import (
+    authenticate_user_with_rate_limit,
+    delete_expired_login_failures,
+    LoginRateLimitError,
+)
 from settings import settings
 from user_service import (
     register_user,
@@ -21,7 +25,8 @@ from session_service import (
     find_session_by_token,
     is_session_valid,
     update_session_activity,
-    revoke_session
+    revoke_session,
+    delete_invalid_sessions,
 )
 
 class HealthResponse(BaseModel):
@@ -155,6 +160,8 @@ def login(payload: LoginRequest, response: Response, db: Session = Depends(get_d
                 }
             },
         )
+    delete_expired_login_failures(db, datetime.now(timezone.utc))
+    delete_invalid_sessions(db, user.id, datetime.now(timezone.utc))
     token = create_session(db, user.id)
 
     response.set_cookie(

@@ -80,15 +80,52 @@ def test_register_returns_422_when_password_is_empty(postgres_db, monkeypatch):
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "VALIDATION_ERROR"
 
-# 로그인 성공 시 사용자 정보, DB 세션 연결 및 쿠키 속성이 올바른지 확인한다.
+# 로그인 성공 시 만료 세션과 오래된 로그인 실패 기록을 정리하고 새 세션을 발급하는지 확인한다.
 def test_login_returns_200_and_sets_session_cookie(postgres_db, monkeypatch):
     monkeypatch.setitem(app.dependency_overrides, get_db, lambda: postgres_db)
     user = register_user(postgres_db, "step19.login@example.com", "testpassword")
+
+    old_token = create_session(postgres_db, user.id)
+    old_session = postgres_db.scalar(
+        select(AuthSession).where(
+            AuthSession.session_token_hash == hash_session_token(old_token)
+        )
+    )
+    assert old_session is not None
+    old_session.expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+    postgres_db.commit()
+
+    stale_failure_email = "step-supplement.stale@example.com"
+    postgres_db.add(
+        LoginFailure(
+            email=stale_failure_email,
+            failure_count=1,
+            window_started_at=datetime.now(timezone.utc)
+            - timedelta(seconds=settings.LOGIN_FAILURE_WINDOW_SECONDS + 1),
+            blocked_until=None,
+        )
+    )
+    postgres_db.commit()
+
     response = client.post(
         "/api/v1/auth/login",
         json={"email": "step19.login@example.com", "password": "testpassword"},
     )
     assert response.status_code == 200
+
+    assert postgres_db.scalar(
+        select(LoginFailure).where(
+            LoginFailure.email == stale_failure_email
+        )
+    ) is None
+
+
+    assert postgres_db.scalar(
+        select(AuthSession).where(
+            AuthSession.session_token_hash == hash_session_token(old_token)
+        )
+    ) is None
+
     assert response.json() == {"id": str(user.id), "email": user.email}
     token = response.cookies.get(settings.SESSION_COOKIE_NAME)
     assert token is not None

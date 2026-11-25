@@ -1,6 +1,6 @@
 from datetime import datetime, timezone, timedelta
 
-from login_service import get_or_create_login_failure, record_login_failure, LoginRateLimitError, authenticate_user_with_rate_limit
+from login_service import delete_expired_login_failures, get_or_create_login_failure, record_login_failure, LoginRateLimitError, authenticate_user_with_rate_limit
 from user_service import register_user, InvalidCredentialsError
 
 from settings import settings
@@ -207,3 +207,39 @@ def test_authenticate_user_with_rate_limit_rejects_blocked_user(
 
     auth_mock.assert_not_called()
     assert 1 <= exc_info.value.retry_after <= 60
+
+# 실패 시간창과 차단이 모두 끝난 기록만 삭제하는지 확인한다.
+def test_delete_expired_login_failures_keeps_active_records(postgres_db):
+    now = datetime.now(timezone.utc)
+    window = timedelta(seconds=settings.LOGIN_FAILURE_WINDOW_SECONDS)
+    postgres_db.add_all([
+        LoginFailure(
+            email="step-supplement.expired@example.com",
+            failure_count=1,
+            window_started_at=now - window - timedelta(seconds=1),
+            blocked_until=None,
+        ),
+        LoginFailure(
+            email="step-supplement.blocked@example.com",
+            failure_count=5,
+            window_started_at=now - window - timedelta(seconds=1),
+            blocked_until=now + timedelta(minutes=1),
+        ),
+        LoginFailure(
+            email="step-supplement.recent@example.com",
+            failure_count=1,
+            window_started_at=now,
+            blocked_until=None,
+        ),
+    ])
+    postgres_db.commit()
+
+    delete_expired_login_failures(postgres_db, now)
+    remaining_emails = set(
+        postgres_db.scalars(select(LoginFailure.email)).all()
+    )
+
+    assert remaining_emails == {
+        "step-supplement.blocked@example.com",
+        "step-supplement.recent@example.com",
+    }

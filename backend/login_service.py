@@ -1,4 +1,6 @@
 from datetime import datetime, timedelta, timezone
+
+from sqlalchemy import delete, or_
 from settings import settings
 from math import ceil
 
@@ -95,6 +97,25 @@ def authenticate_user_with_rate_limit(db: Session, email: str, password: str) ->
         db.delete(failure)
         db.commit()
         return user
+    except SQLAlchemyError:
+        db.rollback()
+        raise
+
+def delete_expired_login_failures(db: Session, now: datetime) -> None:
+    window_cutoff = now - timedelta(
+        seconds=settings.LOGIN_FAILURE_WINDOW_SECONDS
+    )
+    statement = delete(LoginFailure).where(
+        LoginFailure.window_started_at <= window_cutoff,
+        or_(
+            LoginFailure.blocked_until.is_(None),
+            LoginFailure.blocked_until <= now,
+        )
+    )
+
+    try:
+        db.execute(statement)
+        db.commit()
     except SQLAlchemyError:
         db.rollback()
         raise

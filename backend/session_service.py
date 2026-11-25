@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, delete, or_
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -58,3 +58,27 @@ def revoke_session(
 ) -> None:
     session.revoked_at = now
     db.commit()
+
+def delete_invalid_sessions(
+    db: Session,
+    user_id: UUID,
+    now: datetime,
+) -> None:
+    idle_cutoff = now - timedelta(
+        seconds=settings.SESSION_IDLE_TIMEOUT_SECONDS
+    )
+    statement = delete(AuthSession).where(
+        AuthSession.user_id == user_id,
+        or_(
+            AuthSession.revoked_at.is_not(None),
+            AuthSession.expires_at <= now,
+            AuthSession.last_seen_at <= idle_cutoff,
+        )
+    )
+
+    try:
+        db.execute(statement)
+        db.commit()
+    except SQLAlchemyError:
+        db.rollback()
+        raise
