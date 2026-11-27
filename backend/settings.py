@@ -13,6 +13,7 @@ class Settings(BaseSettings):
 
     APP_ENV: Literal["development", "test"] = "development"
     APP_NAME: str = "Health Management App"
+    FRONTEND_ORIGIN: str = "http://127.0.0.1:5173"
 
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: int = 5432
@@ -22,6 +23,7 @@ class Settings(BaseSettings):
 
     SESSION_ABSOLUTE_TIMEOUT_SECONDS: PositiveInt = 30 * 24 * 60 * 60
     SESSION_COOKIE_NAME: str = "hma_session"
+    CSRF_COOKIE_NAME: str = "hma_csrf"
     SESSION_COOKIE_SECURE: bool = False
 
     LOGIN_FAILURE_WINDOW_SECONDS: PositiveInt = 15 * 60

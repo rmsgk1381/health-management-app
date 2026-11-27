@@ -1,4 +1,10 @@
-from security import normalize_email, hash_password, verify_password
+from settings import settings
+from security import (
+    hash_password,
+    is_allowed_origin,
+    normalize_email,
+    verify_password,
+)
 
 # 이메일 양끝 공백을 제거하고 소문자로 정규화하는지 확인한다.
 def test_normalize_email_strips_whitespace_lowercases():
@@ -29,3 +35,9 @@ def test_hash_password_generates_different_hashes_for_same_password():
     assert verify_password("step15-demo-only", second_hash) is True
     assert first_hash != "step15-demo-only"
     assert second_hash != "step15-demo-only"
+
+# 설정된 Origin만 허용하고 누락되거나 다른 Origin은 거부하는지 확인한다.
+def test_is_allowed_origin_requires_exact_match():
+    assert is_allowed_origin(settings.FRONTEND_ORIGIN) is True
+    assert is_allowed_origin("http://127.0.0.1:5174") is False
+    assert is_allowed_origin(None) is False

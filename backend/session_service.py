@@ -9,15 +9,28 @@ from models import Session as AuthSession
 from security import generate_session_token, hash_session_token
 from settings import settings
 
-def create_session(db: Session, user_id: UUID) -> str:
+def create_session(
+    db: Session,
+    user_id: UUID,
+    *,
+    csrf_token: str | None = None,
+) -> str:
     token = generate_session_token()
     hashed_token = hash_session_token(token)
+
+    csrf_token_hash = (
+        hash_session_token(csrf_token)
+        if csrf_token is not None
+        else None
+    )
+
     expires_at = datetime.now(timezone.utc) + timedelta(
         seconds=settings.SESSION_ABSOLUTE_TIMEOUT_SECONDS
     )
     session = AuthSession(
         user_id=user_id,
         session_token_hash=hashed_token,
+        csrf_token_hash=csrf_token_hash,
         expires_at=expires_at,
     )
     db.add(session)
@@ -50,6 +63,19 @@ def is_session_valid(session: AuthSession, now: datetime) -> bool:
 def update_session_activity(db: Session, session: AuthSession, now: datetime) -> None:
     session.last_seen_at = now
     db.commit()
+
+def update_session_csrf_token(
+    db: Session,
+    session: AuthSession,
+    csrf_token: str,
+) -> None:
+    session.csrf_token_hash = hash_session_token(csrf_token)
+
+    try:
+        db.commit()
+    except SQLAlchemyError:
+        db.rollback()
+        raise
 
 def revoke_session(
     db: Session,

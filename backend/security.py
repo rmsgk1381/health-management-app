@@ -1,6 +1,9 @@
-from pwdlib import PasswordHash
-import secrets
 import hashlib
+import secrets
+
+from pwdlib import PasswordHash
+
+from settings import settings
 
 _password_hasher = PasswordHash.recommended()
 
@@ -19,3 +22,6 @@ def generate_session_token() -> str:
 
 def hash_session_token(token: str) -> str:
     return hashlib.sha256(token.encode('utf-8')).hexdigest()
+
+def is_allowed_origin(origin: str | None) -> bool:
+    return origin == settings.FRONTEND_ORIGIN

@@ -12,6 +12,7 @@ from session_service import (
     find_session_by_token,
     is_session_valid,
     update_session_activity,
+    update_session_csrf_token,
     delete_invalid_sessions,
 )
 from settings import settings
@@ -23,13 +24,16 @@ def test_create_session_stores_token_hash(postgres_db):
     user = register_user(
         postgres_db, "step19.session@example.com", "testpassword"
     )
-    token = create_session(postgres_db, user.id)
+    csrf_token = "step23-csrf-test-token"
+    token = create_session(postgres_db, user.id, csrf_token=csrf_token)
     saved_session = postgres_db.scalar(
         select(AuthSession).where(AuthSession.user_id == user.id)
     )
     assert saved_session is not None
     assert saved_session.session_token_hash == hash_session_token(token)
     assert saved_session.session_token_hash != token
+    assert saved_session.csrf_token_hash == hash_session_token(csrf_token)
+    assert saved_session.csrf_token_hash != csrf_token
 
 # 설정한 유효기간을 기준으로 세션의 만료 시각이 저장되는지 확인한다.
 def test_create_session_uses_configured_expiration(postgres_db, monkeypatch):
@@ -145,3 +149,22 @@ def test_delete_invalid_sessions_preserves_active_session(postgres_db):
 
     assert len(remaining) == 1
     assert remaining[0].id == active.id
+
+# 갱신한 CSRF 토큰의 해시만 DB에 저장하는지 확인한다.
+def test_update_session_csrf_token_stores_hash(postgres_db):
+    user = register_user(
+        postgres_db, "step23.csrf-update@example.com", "testpassword"
+    )
+    old_csrf_token = "step23-old-csrf-token"
+    session_token = create_session(
+        postgres_db, user.id, csrf_token=old_csrf_token
+    )
+    session = find_session_by_token(postgres_db, session_token)
+    assert session is not None
+
+    new_csrf_token = "step23-new-csrf-token"
+    update_session_csrf_token(postgres_db, session, new_csrf_token)
+    postgres_db.refresh(session)
+
+    assert session.csrf_token_hash == hash_session_token(new_csrf_token)
+    assert session.csrf_token_hash != new_csrf_token
