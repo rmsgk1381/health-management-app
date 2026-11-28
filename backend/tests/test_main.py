@@ -22,6 +22,49 @@ def test_health_returns_ok():
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
 
+# 허용된 Origin의 사전 요청에서 쿠키·메서드·요청 헤더를 허용하는지 확인한다.
+def test_cors_preflight_allows_api_method_and_headers():
+    response = client.options(
+        "/api/v1/auth/logout",
+        headers={
+            "Origin": settings.FRONTEND_ORIGIN,
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "content-type,x-csrf-token",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers.get("access-control-allow-origin") == settings.FRONTEND_ORIGIN
+    assert response.headers.get("access-control-allow-credentials") == "true"
+
+    allowed_methods = {
+        method.strip()
+        for method in response.headers["access-control-allow-methods"].split(",")
+    }
+    allowed_headers = {
+        header.strip().lower()
+        for header in response.headers["access-control-allow-headers"].split(",")
+    }
+
+    assert {"POST"} <= allowed_methods
+
+    assert {"content-type", "x-csrf-token"} <= allowed_headers
+
+# 허용되지 않은 Origin의 사전 요청에는 CORS 허용 응답을 주지 않는지 확인한다.
+def test_cors_preflight_rejects_untrusted_origin():
+    with TestClient(app) as test_client:
+        response = test_client.options(
+            "/api/v1/auth/logout",
+            headers={
+                "Origin": "http://127.0.0.1:5174",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type,x-csrf-token",
+            },
+        )
+
+    assert response.status_code == 400
+    assert "access-control-allow-origin" not in response.headers
+
 # 등록되지 않은 경로가 404를 반환하는지 확인한다.
 def test_unknown_path_returns_404():
     response = client.get("/not-found")
@@ -111,6 +154,8 @@ def test_login_returns_200_and_sets_session_cookie(postgres_db, monkeypatch):
         json={"email": "step19.login@example.com", "password": "testpassword"},
     )
     assert response.status_code == 200
+    assert response.headers.get("access-control-allow-origin") == settings.FRONTEND_ORIGIN
+    assert response.headers.get("access-control-allow-credentials") == "true"
     csrf_token = response.json()["csrf_token"]
 
     assert postgres_db.scalar(
@@ -299,11 +344,16 @@ def test_get_me_returns_authenticated_user(postgres_db, monkeypatch):
     session.last_seen_at = last_seen_before
     postgres_db.commit()
 
-    with TestClient(app) as test_client:
+    with TestClient(
+        app,
+        headers={"Origin": settings.FRONTEND_ORIGIN},
+    ) as test_client:
         test_client.cookies.set(settings.SESSION_COOKIE_NAME, token)
         response = test_client.get("/api/v1/users/me")
 
     assert response.status_code == 200
+    assert response.headers.get("access-control-allow-origin") == settings.FRONTEND_ORIGIN
+    assert response.headers.get("access-control-allow-credentials") == "true"
     assert response.json() == {"id": str(user.id), "email": user.email}
 
     postgres_db.refresh(session)
@@ -424,6 +474,8 @@ def test_logout_is_idempotent_and_clears_cookie(
         cookie.load(response.headers["set-cookie"])
 
         assert response.status_code == 204
+        assert response.headers.get("access-control-allow-origin") == settings.FRONTEND_ORIGIN
+        assert response.headers.get("access-control-allow-credentials") == "true"
         assert cookie[settings.SESSION_COOKIE_NAME].value == ""
         assert cookie[settings.SESSION_COOKIE_NAME]["max-age"] == "0"
         assert cookie[settings.SESSION_COOKIE_NAME]["expires"]
@@ -607,6 +659,8 @@ def test_post_csrf_refresh_rotates_token_for_active_session(
         response = test_client.post("/api/v1/auth/csrf")
 
     assert response.status_code == 200
+    assert response.headers.get("access-control-allow-origin") == settings.FRONTEND_ORIGIN
+    assert response.headers.get("access-control-allow-credentials") == "true"
     assert response.headers["Cache-Control"] == "no-store"
     new_csrf_token = response.json()["csrf_token"]
     assert new_csrf_token != old_csrf_token
