@@ -9,10 +9,10 @@
 ## 기술 구성
 
 ### 현재 준비됨
-React, TypeScript, Vite, FastAPI, SQLAlchemy, Alembic, PostgreSQL
+React·TypeScript·Vite 기본 프로젝트, FastAPI, SQLAlchemy, Alembic, PostgreSQL
 
 ### 후속 구현
-요청별 세션 검증, 로그아웃, 체중 기록 CRUD 및 사용자별 접근 권한
+체중 기록 스키마·CRUD, 사용자별 접근 권한 및 대시보드
 
 ## 디렉터리 구조
 - backend - 프로젝트의 서버 역할을 하는 부분
@@ -78,6 +78,7 @@ py -3.11 -m venv .venv-verify
 
 ## 현재 상태
 - 프론트엔드: React·TypeScript·Vite 기본 프로젝트 구성
-- 백엔드: PostgreSQL 연결, 회원가입·로그인, 세션 토큰 해시 저장과 쿠키 발급, 로그인 실패 횟수 제한 및 관련 테스트 구성
-- API: `/health`, `/api/v1/auth/register`, `/api/v1/auth/login`
-- 후속 구현: 요청별 세션 검증, 로그아웃, 체중 기록 CRUD 및 사용자별 접근 권한
+- 백엔드: PostgreSQL 연결, 회원가입·로그인, 해시 기반 세션 저장·검증·폐기, 로그인 실패 제한, CSRF 토큰 검증, 개발 Origin CORS 허용
+- 인증·보안 챕터: Step 15–24 검증 완료. CORS는 브라우저 응답 접근을 제어하고 CSRF 검증은 서버에서 별도로 수행
+- API: `/health`, `/api/v1/auth/register`, `/api/v1/auth/login`, `/api/v1/auth/logout`, `GET/POST /api/v1/auth/csrf`, `/api/v1/users/me`
+- 다음 작업: Step 25 — 체중 요청·응답 스키마와 Decimal 검증. 이후 체중 기록 CRUD 및 사용자별 접근 권한을 구현
